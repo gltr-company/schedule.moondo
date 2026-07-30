@@ -35,15 +35,22 @@ jobs:
           curl --fail --location --retry 3
           'https://raw.githubusercontent.com/edwardkim/rhwp/v0.8.2/samples/basic/treatise%20sample.hwp'
           --output style-sample.hwp
-      - name: Build corrected empty-document scenario
+      - name: Build corrected validation scenario
         working-directory: validation/rhwp-core-smoke
         run: |
           python - <<'PY'
           from pathlib import Path
           source = Path('validate.mjs').read_text(encoding='utf-8')
-          invalid = '    parseObject(document.applyStyle(0, 0, 0), "applyStyle");\n'
-          assert source.count(invalid) == 1
-          Path('validate-run.mjs').write_text(source.replace(invalid, ''), encoding='utf-8')
+          empty_style = '    parseObject(document.applyStyle(0, 0, 0), "applyStyle");\n'
+          footnote_exact = '    assert.equal(footnoteInfo.texts[0], "각주 내용");\n'
+          assert source.count(empty_style) == 1
+          assert source.count(footnote_exact) == 1
+          source = source.replace(empty_style, '')
+          source = source.replace(
+              footnote_exact,
+              '    assert.equal(String(footnoteInfo.texts[0]).trimEnd(), "각주 내용");\n',
+          )
+          Path('validate-run.mjs').write_text(source, encoding='utf-8')
           PY
       - name: Run real WASM edit, rollback, serialization, reopen and render checks
         working-directory: validation/rhwp-core-smoke
