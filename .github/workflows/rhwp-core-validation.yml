@@ -1,0 +1,42 @@
+name: Independent rhwp core WASM validation
+
+on:
+  pull_request:
+    paths:
+      - "validation/rhwp-core-smoke/**"
+      - ".github/workflows/rhwp-core-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  published-core:
+    name: Published @rhwp/core 0.8.2 real WASM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install exact public package
+        working-directory: validation/rhwp-core-smoke
+        run: |
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund --save-exact @rhwp/core@0.8.2
+          node -e 'const p=require("./node_modules/@rhwp/core/package.json"); if(p.version!=="0.8.2") process.exit(1)'
+      - name: Run real WASM edit, rollback, serialization, reopen and render checks
+        working-directory: validation/rhwp-core-smoke
+        run: node validate.mjs
+      - name: Upload machine-readable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-core-0.8.2-validation-report
+          path: validation/rhwp-core-smoke/report.json
+          if-no-files-found: warn
+          retention-days: 7
