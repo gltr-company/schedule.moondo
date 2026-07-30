@@ -29,14 +29,35 @@ jobs:
           npm init -y >/dev/null
           npm install --no-audit --no-fund --save-exact @rhwp/core@0.8.2
           node -e 'const p=require("./node_modules/@rhwp/core/package.json"); if(p.version!=="0.8.2") process.exit(1)'
+      - name: Download a real styled HWP fixture
+        working-directory: validation/rhwp-core-smoke
+        run: >-
+          curl --fail --location --retry 3
+          'https://raw.githubusercontent.com/edwardkim/rhwp/v0.8.2/samples/basic/treatise%20sample.hwp'
+          --output style-sample.hwp
+      - name: Build corrected empty-document scenario
+        working-directory: validation/rhwp-core-smoke
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('validate.mjs').read_text(encoding='utf-8')
+          invalid = '    parseObject(document.applyStyle(0, 0, 0), "applyStyle");\n'
+          assert source.count(invalid) == 1
+          Path('validate-run.mjs').write_text(source.replace(invalid, ''), encoding='utf-8')
+          PY
       - name: Run real WASM edit, rollback, serialization, reopen and render checks
         working-directory: validation/rhwp-core-smoke
-        run: node validate.mjs
+        run: node validate-run.mjs
+      - name: Validate style application on a real styled HWP
+        working-directory: validation/rhwp-core-smoke
+        run: node validate-style.mjs style-sample.hwp
       - name: Upload machine-readable evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rhwp-core-0.8.2-validation-report
-          path: validation/rhwp-core-smoke/report.json
+          path: |
+            validation/rhwp-core-smoke/report.json
+            validation/rhwp-core-smoke/style-report.json
           if-no-files-found: warn
           retention-days: 7
