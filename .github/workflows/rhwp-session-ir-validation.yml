@@ -1,0 +1,56 @@
+name: Exact rhwp Session IR validation
+
+on:
+  pull_request:
+    paths:
+      - "validation/rhwp-session-ir-v3/**"
+      - ".github/workflows/rhwp-session-ir-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-private-source:
+    name: Exact private branch compile and WASM integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Fetch exact private branch archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/gltr-company/rhwp/tarball/agent/issue-9-session-ir-anchors \
+            --output /tmp/rhwp.tar.gz
+          mkdir -p /tmp/rhwp
+          tar -xzf /tmp/rhwp.tar.gz --strip-components=1 -C /tmp/rhwp
+      - name: Install runtime dependencies
+        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+        run: |
+          npm install --no-audit --no-fund --registry=https://registry.npmjs.org
+          npm install --no-audit --no-fund --save-exact @rhwp/core@0.8.2 --registry=https://registry.npmjs.org
+      - name: Strict compile and deterministic Session IR tests
+        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+        run: npm run test:unit
+      - name: Download styled HWP fixture
+        run: >-
+          curl --fail --location --retry 3
+          'https://raw.githubusercontent.com/edwardkim/rhwp/v0.8.2/samples/basic/treatise%20sample.hwp'
+          --output /tmp/style-sample.hwp
+      - name: Actual published WASM Session IR integration
+        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+        env:
+          RHWP_CORE_MODULE: node_modules/@rhwp/core/rhwp.js
+          RHWP_WASM: node_modules/@rhwp/core/rhwp_bg.wasm
+          RHWP_STYLE_SAMPLE: /tmp/style-sample.hwp
+        run: npm run test:real
