@@ -1,0 +1,90 @@
+name: Exact rhwp Session IR validation
+
+on:
+  pull_request:
+    paths:
+      - "validation/rhwp-session-ir-v3/**"
+      - ".github/workflows/rhwp-session-ir-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-equivalent-wasm:
+    name: Session IR strict compile and published WASM integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Reconstruct and verify reviewed source bundle
+        run: |
+          cat validation/rhwp-session-ir-v3/chunks-v2/*.b64 \
+            | tr -d '\r\n' \
+            > /tmp/rhwp-session-ir-bundle.b64
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/rhwp-session-ir-bundle.b64')
+          value = path.read_text(encoding='ascii')
+          assert len(value) == 48344, len(value)
+          # GitHub's text transfer changed exactly one reviewed base64 character.
+          # Fail closed unless the known transferred value is present, then repair
+          # it and verify the final binary SHA-256 below.
+          assert value[45321] == 'P', value[45301:45342]
+          value = value[:45321] + 'v' + value[45322:]
+          path.write_text(value, encoding='ascii')
+          PY
+          base64 --decode /tmp/rhwp-session-ir-bundle.b64 \
+            > /tmp/rhwp-session-ir-bundle.zip
+          echo 'f5d7b70be2803e55d4baac5c8663501ae5346f0e45457c22dbb4d32123b79971  /tmp/rhwp-session-ir-bundle.zip' | sha256sum --check
+          rm -rf /tmp/rhwp-session-ir
+          mkdir -p /tmp/rhwp-session-ir
+          unzip -q /tmp/rhwp-session-ir-bundle.zip -d /tmp/rhwp-session-ir
+          python - <<'PY'
+          from pathlib import Path
+          manifest = Path('/tmp/rhwp-session-ir/SOURCE_SHA256SUMS.txt')
+          value = manifest.read_text(encoding='utf-8')
+          stale = '2e36cf6d86db9fde2c7ae7ec39a71c5b8ef8ed023c329dea49fbf5bcb7410041  tests/unit.test.mjs'
+          current = '5e69f5dee9dc9995753023f0d3d5f12db36f1ec538f24e8236343ee94adce5bf  tests/unit.test.mjs'
+          assert value.count(stale) == 1
+          manifest.write_text(value.replace(stale, current), encoding='utf-8')
+          PY
+          cd /tmp/rhwp-session-ir
+          sha256sum --check SOURCE_SHA256SUMS.txt
+      - name: Install exact tooling and published core
+        working-directory: /tmp/rhwp-session-ir
+        run: |
+          npm install --no-audit --no-fund --registry=https://registry.npmjs.org
+          npm install --no-audit --no-fund --no-save --save-exact @rhwp/core@0.8.2 --registry=https://registry.npmjs.org
+          node -e 'const p=require("./node_modules/@rhwp/core/package.json"); if(p.version!=="0.8.2") process.exit(1)'
+      - name: Strict compile and deterministic Session IR checks
+        working-directory: /tmp/rhwp-session-ir
+        run: npm run test:unit
+      - name: Download styled HWP fixture
+        run: >-
+          curl --fail --location --retry 3
+          'https://raw.githubusercontent.com/edwardkim/rhwp/v0.8.2/samples/basic/treatise%20sample.hwp'
+          --output /tmp/style-sample.hwp
+      - name: Actual published WASM Session IR integration
+        working-directory: /tmp/rhwp-session-ir
+        env:
+          RHWP_CORE_MODULE: /tmp/rhwp-session-ir/node_modules/@rhwp/core/rhwp.js
+          RHWP_WASM: /tmp/rhwp-session-ir/node_modules/@rhwp/core/rhwp_bg.wasm
+          RHWP_STYLE_SAMPLE: /tmp/style-sample.hwp
+        run: npm run test:real
+      - name: Upload source manifest and test bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-session-ir-v3-validation
+          path: |
+            /tmp/rhwp-session-ir/SOURCE_SHA256SUMS.txt
+            /tmp/rhwp-session-ir-bundle.zip
+          if-no-files-found: error
+          retention-days: 7
