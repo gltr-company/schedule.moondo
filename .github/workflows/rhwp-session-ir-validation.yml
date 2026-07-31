@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  exact-private-source:
-    name: Exact private branch compile and WASM integration
+  source-equivalent-wasm:
+    name: Session IR strict compile and published WASM integration
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -23,24 +23,22 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - name: Fetch exact private branch archive
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify and unpack reviewed source bundle
         run: |
-          curl --fail --location --silent --show-error \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/gltr-company/rhwp/tarball/agent/issue-9-session-ir-anchors \
-            --output /tmp/rhwp.tar.gz
-          mkdir -p /tmp/rhwp
-          tar -xzf /tmp/rhwp.tar.gz --strip-components=1 -C /tmp/rhwp
-      - name: Install runtime dependencies
-        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+          echo 'f5d7b70be2803e55d4baac5c8663501ae5346f0e45457c22dbb4d32123b79971  validation/rhwp-session-ir-v3/bundle.zip' | sha256sum --check
+          rm -rf /tmp/rhwp-session-ir
+          mkdir -p /tmp/rhwp-session-ir
+          unzip -q validation/rhwp-session-ir-v3/bundle.zip -d /tmp/rhwp-session-ir
+          cd /tmp/rhwp-session-ir
+          sha256sum --check SOURCE_SHA256SUMS.txt
+      - name: Install exact tooling and published core
+        working-directory: /tmp/rhwp-session-ir
         run: |
           npm install --no-audit --no-fund --registry=https://registry.npmjs.org
-          npm install --no-audit --no-fund --save-exact @rhwp/core@0.8.2 --registry=https://registry.npmjs.org
-      - name: Strict compile and deterministic Session IR tests
-        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+          npm install --no-audit --no-fund --no-save --save-exact @rhwp/core@0.8.2 --registry=https://registry.npmjs.org
+          node -e 'const p=require("./node_modules/@rhwp/core/package.json"); if(p.version!=="0.8.2") process.exit(1)'
+      - name: Strict compile and deterministic Session IR checks
+        working-directory: /tmp/rhwp-session-ir
         run: npm run test:unit
       - name: Download styled HWP fixture
         run: >-
@@ -48,9 +46,19 @@ jobs:
           'https://raw.githubusercontent.com/edwardkim/rhwp/v0.8.2/samples/basic/treatise%20sample.hwp'
           --output /tmp/style-sample.hwp
       - name: Actual published WASM Session IR integration
-        working-directory: /tmp/rhwp/tools/rhwp-core-runtime
+        working-directory: /tmp/rhwp-session-ir
         env:
-          RHWP_CORE_MODULE: node_modules/@rhwp/core/rhwp.js
-          RHWP_WASM: node_modules/@rhwp/core/rhwp_bg.wasm
+          RHWP_CORE_MODULE: /tmp/rhwp-session-ir/node_modules/@rhwp/core/rhwp.js
+          RHWP_WASM: /tmp/rhwp-session-ir/node_modules/@rhwp/core/rhwp_bg.wasm
           RHWP_STYLE_SAMPLE: /tmp/style-sample.hwp
         run: npm run test:real
+      - name: Upload source manifest and test bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-session-ir-v3-validation
+          path: |
+            /tmp/rhwp-session-ir/SOURCE_SHA256SUMS.txt
+            validation/rhwp-session-ir-v3/bundle.zip
+          if-no-files-found: error
+          retention-days: 7
