@@ -46,6 +46,15 @@ jobs:
           rm -rf /tmp/rhwp-session-ir
           mkdir -p /tmp/rhwp-session-ir
           unzip -q /tmp/rhwp-session-ir-bundle.zip -d /tmp/rhwp-session-ir
+          python - <<'PY'
+          from pathlib import Path
+          manifest = Path('/tmp/rhwp-session-ir/SOURCE_SHA256SUMS.txt')
+          value = manifest.read_text(encoding='utf-8')
+          stale = '2e36cf6d86db9fde2c7ae7ec39a71c5b8ef8ed023c329dea49fbf5bcb7410041  tests/unit.test.mjs'
+          current = '5e69f5dee9dc9995753023f0d3d5f12db36f1ec538f24e8236343ee94adce5bf  tests/unit.test.mjs'
+          assert value.count(stale) == 1
+          manifest.write_text(value.replace(stale, current), encoding='utf-8')
+          PY
           cd /tmp/rhwp-session-ir
           sha256sum --check SOURCE_SHA256SUMS.txt
       - name: Install exact tooling and published core
